@@ -9,9 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "graphql-request": "^7.1.0",
+    "moralis": "^2.26.7",
+    "next": "14.2.4",
     "react": "^18",
     "react-dom": "^18",
-    "next": "14.2.4"
+    "viem": "^2.16.5"
   },
   "devDependencies": {
     "typescript": "^5",
