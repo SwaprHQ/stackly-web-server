@@ -23,6 +23,11 @@ async function findAsyncSequential<T>(
   return undefined;
 }
 
+type DCAOrder = {
+  amount: string;
+  sellToken: { address: string; decimals: number };
+};
+
 export async function POST(request: Request) {
   const payload = await request.json();
   const headers = request.headers;
@@ -46,10 +51,73 @@ export async function POST(request: Request) {
     id: walletAddress.toLowerCase(),
     startTime_gte: +startTime,
   })) as {
-    dcaorders: {
-      amount: string;
-      sellToken: { address: string; decimals: number };
-    }[];
+    dcaorders: DCAOrder[];
+  };
+
+  const getUSDPriceMoralis = async (order: DCAOrder): Promise<number> => {
+    const response = await Moralis.EvmApi.token.getTokenPrice({
+      chain: "0xa4b1",
+      address: order.sellToken.address,
+    });
+
+    return response.raw.usdPrice;
+  };
+
+  const getUSDPriceMobula = async (order: DCAOrder): Promise<number> => {
+    const response = await fetch(
+      `https://api.mobula.io/api/1/market/data?asset=${order.sellToken.address}&blockchain=42161`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: process.env.MOBULA_API_KEY || "",
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    return data.data.price;
+  };
+
+  const getUSDPriceCoinGecko = async (order: DCAOrder): Promise<number> => {
+    const url = `https://api.coingecko.com/api/v3/simple/token_price/arbitrum-one?contract_addresses=${order.sellToken.address}&vs_currencies=usd`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        "x-cg-api-key": process.env.COINGECKO_API_KEY || "",
+      },
+    });
+
+    const data = await response.json();
+
+    return data[order.sellToken.address.toLowerCase()].usd;
+  };
+
+  const getUSDPricePortals = async (order: DCAOrder): Promise<number> => {
+    const url = `https://api.portals.fi/v2/tokens?ids=arbitrum:${order.sellToken.address}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: process.env.PORTALS_API_KEY || "",
+      },
+    });
+
+    const data = await response.json();
+
+    return data.tokens[0].price;
+  };
+
+  const getPrice = (order: DCAOrder) => {
+    const optionNumber = Math.floor(Math.random() * 100);
+
+    // use mobula and portals more frequently since they have better plans
+    if (optionNumber > 50) return getUSDPriceMobula(order);
+    else if (optionNumber > 25) return getUSDPricePortals(order);
+    else if (optionNumber > 10) return getUSDPriceCoinGecko(order);
+    else return getUSDPriceCoinGecko(order);
   };
 
   const result = await findAsyncSequential(
@@ -57,12 +125,9 @@ export async function POST(request: Request) {
     async (order) => {
       try {
         const tokenAmount = formatEther(BigInt(order.amount));
-        const response = await Moralis.EvmApi.token.getTokenPrice({
-          chain: "0xa4b1",
-          address: order.sellToken.address,
-        });
+        const usdPrice = await getPrice(order);
 
-        const stackValue = response.raw.usdPrice * +tokenAmount;
+        const stackValue = usdPrice * +tokenAmount;
         if (stackValue >= +minmumValue) return true;
 
         return false;
