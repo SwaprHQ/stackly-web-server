@@ -1,6 +1,6 @@
 import request, { gql } from "graphql-request";
 import Moralis from "moralis";
-import { formatEther } from "viem";
+import { formatEther, formatUnits } from "viem";
 
 export const dynamic = "force-dynamic"; // static by default, unless reading the request
 export const runtime = "nodejs";
@@ -27,6 +27,16 @@ type DCAOrder = {
   amount: string;
   sellToken: { address: string; decimals: number };
 };
+
+const ALLOWED_TOKEN_LIST = [
+  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
+  "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", // WBTC
+  "0x912CE59144191C1204E64559FE8253a0e49E6548", // ARB
+  "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", // DAI
+  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
+  "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", // USDC.e
+  "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", // USDT
+];
 
 export async function POST(request: Request) {
   const payload = await request.json();
@@ -117,17 +127,32 @@ export async function POST(request: Request) {
     if (optionNumber > 50) return getUSDPriceMobula(order);
     else if (optionNumber > 25) return getUSDPricePortals(order);
     else if (optionNumber > 10) return getUSDPriceCoinGecko(order);
-    else return getUSDPriceCoinGecko(order);
+    else return getUSDPriceMoralis(order);
   };
 
   const result = await findAsyncSequential(
-    userOrders.dcaorders,
+    userOrders.dcaorders.filter((order) =>
+      ALLOWED_TOKEN_LIST.some(
+        (token) => token.toLowerCase() === order.sellToken.address.toLowerCase()
+      )
+    ),
     async (order) => {
       try {
-        const tokenAmount = formatEther(BigInt(order.amount));
+        const tokenAmount = formatUnits(
+          BigInt(order.amount),
+          order.sellToken.decimals
+        );
         const usdPrice = await getPrice(order);
-
         const stackValue = usdPrice * +tokenAmount;
+
+        console.log("Checking order: ", {
+          token: order.sellToken.address,
+          amount: order.amount,
+          walletAddress,
+          usdPrice,
+          stackValue,
+        });
+
         if (stackValue >= +minmumValue) return true;
 
         return false;
